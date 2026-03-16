@@ -145,9 +145,9 @@ impl TradeExecutor for GenericTradeExecutor {
 
         let need_confirm = params.wait_transaction_confirmed;
         let result = execute_parallel(
-            &params.swqos_clients,
+            params.swqos_clients.as_slice(),
             params.payer,
-            params.rpc.clone(),
+            params.rpc.as_ref(),
             final_instructions,
             params.address_lookup_table_account,
             params.recent_blockhash,
@@ -159,6 +159,8 @@ impl TradeExecutor for GenericTradeExecutor {
             if is_buy { true } else { params.with_tip },
             params.gas_fee_strategy,
             params.use_core_affinity,
+            params.use_dedicated_sender_threads,
+            params.sender_thread_cores.as_ref().map(|a| a.as_slice()),
             params.check_min_tip,
         )
         .await;
@@ -171,6 +173,7 @@ impl TradeExecutor for GenericTradeExecutor {
             }
             Err(e) => (false, vec![], Some(anyhow::anyhow!("{}", e)), vec![]),
         };
+        // submit_timings 为完成先后顺序（先完成的先 push），打印不排序、不增加延迟
         let submit_timings_ref: &[(crate::swqos::SwqosType, i64)] = submit_timings.as_slice();
 
         let result = if need_confirm {

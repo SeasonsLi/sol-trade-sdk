@@ -12,8 +12,10 @@ const TX_BUILDER_INSTRUCTION_CAP: usize = 32;
 const TX_BUILDER_LOOKUP_TABLE_CAP: usize = 8;
 /// 对象池最大容量
 const TX_BUILDER_POOL_CAP: usize = 1000;
-/// 启动时预填充对象池数量
-const TX_BUILDER_POOL_PREFILL: usize = 100;
+/// 多路提交并发数（与 async_executor SWQOS_DEDICATED_DEFAULT_THREADS 一致，保证不串行）
+const PARALLEL_SENDER_COUNT: usize = 18;
+/// 启动时预填充数量，必须 >= PARALLEL_SENDER_COUNT，否则 18 路并发 build 会触发分配或争抢
+const TX_BUILDER_POOL_PREFILL: usize = 64;
 
 use crossbeam_queue::ArrayQueue;
 use once_cell::sync::Lazy;
@@ -104,11 +106,10 @@ impl PreallocatedTxBuilder {
 /// 🚀 全局交易构建器对象池
 static TX_BUILDER_POOL: Lazy<Arc<ArrayQueue<PreallocatedTxBuilder>>> = Lazy::new(|| {
     let pool = ArrayQueue::new(TX_BUILDER_POOL_CAP);
-
-    for _ in 0..TX_BUILDER_POOL_PREFILL {
+    let prefill = TX_BUILDER_POOL_PREFILL.max(PARALLEL_SENDER_COUNT);
+    for _ in 0..prefill {
         let _ = pool.push(PreallocatedTxBuilder::new());
     }
-
     Arc::new(pool)
 });
 

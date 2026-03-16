@@ -1,6 +1,7 @@
 //! Parallel executor for multi-SWQOS submit.
 //!
-//! - **Pool**: Pre-spawned workers; hot path only enqueues jobs (no per-call tokio::spawn).
+//! - **Pool**: Pre-spawned workers (default 18); hot path only enqueues jobs (no per-call tokio::spawn).
+//! - **Dedicated threads** (opt-in via TradeConfig): When `use_dedicated_sender_threads` is true, N OS threads (default 18) run sender work only, optionally pinned to cores via `sender_thread_cores`, reducing scheduling contention when sending many txs.
 //! - **Arc**: Shared data is behind `Arc` so "clone" is just a refcount increment (no data copy).
 //! - **Refs**: `build_transaction` takes `&Arc<..>`, `Option<&DurableNonceInfo>`, `Option<&AddressLookupTableAccount>` so the worker passes refs only (zero clone on worker path).
 
@@ -15,6 +16,7 @@ use solana_sdk::{
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Mutex;
 use std::{str::FromStr, sync::Arc, time::Instant};
 use tokio::sync::Notify;
 
@@ -29,8 +31,10 @@ use crate::{
     trading::{common::build_transaction, MiddlewareManager},
 };
 
-const SWQOS_POOL_WORKERS: usize = 32;
+/// 与 transaction_pool::PARALLEL_SENDER_COUNT 一致，保证多路 build 不串行
+const SWQOS_POOL_WORKERS: usize = 18;
 const SWQOS_QUEUE_CAP: usize = 128;
+const SWQOS_DEDICATED_DEFAULT_THREADS: usize = 18;
 
 /// Shared across all jobs in one batch; built once, cloned as single Arc per job (minimal hot-path clone).
 struct SwqosSharedContext {
@@ -143,6 +147,59 @@ async fn swqos_worker_loop(queue: Arc<ArrayQueue<SwqosJob>>, notify: Arc<Notify>
 static SWQOS_QUEUE: OnceCell<Arc<ArrayQueue<SwqosJob>>> = OnceCell::new();
 static SWQOS_NOTIFY: OnceCell<Arc<Notify>> = OnceCell::new();
 static SWQOS_WORKERS_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Dedicated OS-thread sender pool. Queue and notify are in OnceCell so hot path never takes a lock after init.
+static DEDICATED_QUEUE: OnceCell<Arc<ArrayQueue<SwqosJob>>> = OnceCell::new();
+static DEDICATED_NOTIFY: OnceCell<Arc<Notify>> = OnceCell::new();
+/// JoinHandles kept so dedicated threads are not detached; only touched during init under lock.
+static DEDICATED_INIT: Mutex<Option<Vec<std::thread::JoinHandle<()>>>> = Mutex::new(None);
+
+fn ensure_dedicated_pool(sender_thread_cores: Option<&[usize]>) -> (Arc<ArrayQueue<SwqosJob>>, Arc<Notify>) {
+    if let (Some(q), Some(n)) = (DEDICATED_QUEUE.get(), DEDICATED_NOTIFY.get()) {
+        return (q.clone(), n.clone());
+    }
+    let mut guard = DEDICATED_INIT.lock().expect("dedicated init mutex");
+    if let (Some(q), Some(n)) = (DEDICATED_QUEUE.get(), DEDICATED_NOTIFY.get()) {
+        return (q.clone(), n.clone());
+    }
+    let n = sender_thread_cores
+        .map(|v| v.len())
+        .unwrap_or(SWQOS_DEDICATED_DEFAULT_THREADS)
+        .min(32);
+    let queue = Arc::new(ArrayQueue::new(SWQOS_QUEUE_CAP));
+    let notify = Arc::new(Notify::new());
+    let core_ids: Vec<core_affinity::CoreId> = sender_thread_cores
+        .and_then(|indices| {
+            core_affinity::get_core_ids().map(|ids| {
+                indices
+                    .iter()
+                    .filter_map(|&i| ids.get(i).cloned())
+                    .collect()
+            })
+        })
+        .unwrap_or_default();
+    let mut handles = Vec::with_capacity(n);
+    for i in 0..n {
+        let queue = queue.clone();
+        let notify = notify.clone();
+        let core_id = core_ids.get(i).cloned();
+        let handle = std::thread::spawn(move || {
+            if let Some(cid) = core_id {
+                core_affinity::set_for_current(cid);
+            }
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("dedicated sender runtime");
+            rt.block_on(swqos_worker_loop(queue, notify));
+        });
+        handles.push(handle);
+    }
+    let _ = DEDICATED_QUEUE.set(queue.clone());
+    let _ = DEDICATED_NOTIFY.set(notify.clone());
+    *guard = Some(handles);
+    (queue, notify)
+}
 
 fn ensure_swqos_pool(queue: Arc<ArrayQueue<SwqosJob>>) {
     if SWQOS_WORKERS_STARTED.swap(true, Ordering::AcqRel) {
@@ -346,7 +403,7 @@ impl ResultCollector {
 pub async fn execute_parallel(
     swqos_clients: &[Arc<SwqosClient>],
     payer: Arc<Keypair>,
-    rpc: Option<Arc<SolanaRpcClient>>,
+    rpc: Option<&Arc<SolanaRpcClient>>,
     instructions: Vec<Instruction>,
     address_lookup_table_account: Option<AddressLookupTableAccount>,
     recent_blockhash: Option<Hash>,
@@ -358,6 +415,8 @@ pub async fn execute_parallel(
     with_tip: bool,
     gas_fee_strategy: GasFeeStrategy,
     use_core_affinity: bool,
+    use_dedicated_sender_threads: bool,
+    sender_thread_cores: Option<&[usize]>,
     check_min_tip: bool,
 ) -> Result<(bool, Vec<Signature>, Option<anyhow::Error>, Vec<(SwqosType, i64)>)> {
     let _exec_start = Instant::now();
@@ -427,7 +486,7 @@ pub async fn execute_parallel(
     let shared = Arc::new(SwqosSharedContext {
         payer,
         instructions,
-        rpc,
+        rpc: rpc.cloned(),
         address_lookup_table_account,
         recent_blockhash,
         durable_nonce,
@@ -439,8 +498,13 @@ pub async fn execute_parallel(
         collector: collector.clone(),
     });
 
-    let queue = SWQOS_QUEUE.get_or_init(|| Arc::new(ArrayQueue::new(SWQOS_QUEUE_CAP)));
-    ensure_swqos_pool(queue.clone());
+    let (queue, notify) = if use_dedicated_sender_threads {
+        ensure_dedicated_pool(sender_thread_cores)
+    } else {
+        let q = SWQOS_QUEUE.get_or_init(|| Arc::new(ArrayQueue::new(SWQOS_QUEUE_CAP)));
+        ensure_swqos_pool(q.clone());
+        (q.clone(), SWQOS_NOTIFY.get_or_init(|| Arc::new(Notify::new())).clone())
+    };
 
     {
         // Cache tip_account per client (one get_tip_account/from_str per unique client per batch). Dropped before await so future stays Send.
@@ -479,10 +543,7 @@ pub async fn execute_parallel(
         }
     }
 
-    // Wake all workers to process enqueued jobs
-    if let Some(notify) = SWQOS_NOTIFY.get() {
-        notify.notify_waiters();
-    }
+    notify.notify_waiters();
 
     // All jobs enqueued (no spawn on hot path)
 

@@ -86,8 +86,8 @@ pub enum TradeTokenType {
 pub struct TradingInfrastructure {
     /// Shared RPC client for blockchain interactions
     pub rpc: Arc<SolanaRpcClient>,
-    /// Shared SWQOS clients for transaction priority and routing
-    pub swqos_clients: Vec<Arc<SwqosClient>>,
+    /// Shared SWQOS clients for transaction priority and routing. Arc<Vec<..>> so cloning into SwapParams is a single Arc clone.
+    pub swqos_clients: Arc<Vec<Arc<SwqosClient>>>,
     /// Configuration used to create this infrastructure
     pub config: InfrastructureConfig,
 }
@@ -175,7 +175,11 @@ impl TradingInfrastructure {
             }
         }
 
-        Self { rpc, swqos_clients, config }
+        Self {
+            rpc,
+            swqos_clients: Arc::new(swqos_clients),
+            config,
+        }
     }
 }
 
@@ -197,6 +201,10 @@ pub struct TradingClient {
     pub use_seed_optimize: bool,
     /// Whether to pin parallel submit tasks to CPU cores (from TradeConfig.use_core_affinity). Default true.
     pub use_core_affinity: bool,
+    /// Use dedicated sender threads (from TradeConfig.use_dedicated_sender_threads). Default false.
+    pub use_dedicated_sender_threads: bool,
+    /// Core indices for dedicated sender threads (from TradeConfig.sender_thread_cores). Arc avoids cloning the Vec when building SwapParams.
+    pub sender_thread_cores: Option<Arc<Vec<usize>>>,
     /// Whether to output all SDK logs (from TradeConfig.log_enabled).
     pub log_enabled: bool,
     /// Whether to check minimum tip per SWQOS (from TradeConfig.check_min_tip). Default false for lower latency.
@@ -216,6 +224,8 @@ impl Clone for TradingClient {
             middleware_manager: self.middleware_manager.clone(),
             use_seed_optimize: self.use_seed_optimize,
             use_core_affinity: self.use_core_affinity,
+            use_dedicated_sender_threads: self.use_dedicated_sender_threads,
+            sender_thread_cores: self.sender_thread_cores.clone(),
             log_enabled: self.log_enabled,
             check_min_tip: self.check_min_tip,
         }
@@ -345,6 +355,8 @@ impl TradingClient {
             middleware_manager: None,
             use_seed_optimize,
             use_core_affinity: true,
+            use_dedicated_sender_threads: false,
+            sender_thread_cores: None,
             log_enabled: true,
             check_min_tip: false,
         }
@@ -385,6 +397,8 @@ impl TradingClient {
             middleware_manager: None,
             use_seed_optimize,
             use_core_affinity: true,
+            use_dedicated_sender_threads: false,
+            sender_thread_cores: None,
             log_enabled: true,
             check_min_tip: false,
         }
@@ -560,6 +574,8 @@ impl TradingClient {
             middleware_manager: None,
             use_seed_optimize: trade_config.use_seed_optimize,
             use_core_affinity: trade_config.use_core_affinity,
+            use_dedicated_sender_threads: trade_config.use_dedicated_sender_threads,
+            sender_thread_cores: trade_config.sender_thread_cores.clone(),
             log_enabled: trade_config.log_enabled,
             check_min_tip: trade_config.check_min_tip,
         };
@@ -706,6 +722,8 @@ impl TradingClient {
             simulate: params.simulate,
             log_enabled: self.log_enabled,
             use_core_affinity: self.use_core_affinity,
+            use_dedicated_sender_threads: self.use_dedicated_sender_threads,
+            sender_thread_cores: self.sender_thread_cores.clone(),
             check_min_tip: self.check_min_tip,
             grpc_recv_us: params.grpc_recv_us,
             use_exact_sol_amount: params.use_exact_sol_amount,
@@ -810,6 +828,8 @@ impl TradingClient {
             simulate: params.simulate,
             log_enabled: self.log_enabled,
             use_core_affinity: self.use_core_affinity,
+            use_dedicated_sender_threads: self.use_dedicated_sender_threads,
+            sender_thread_cores: self.sender_thread_cores.clone(),
             check_min_tip: self.check_min_tip,
             grpc_recv_us: params.grpc_recv_us,
             use_exact_sol_amount: None,

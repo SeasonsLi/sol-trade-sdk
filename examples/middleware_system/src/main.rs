@@ -31,7 +31,7 @@ impl InstructionMiddleware for CustomMiddleware {
     fn process_protocol_instructions(
         &self,
         protocol_instructions: Vec<Instruction>,
-        _protocol_name: String,
+        _protocol_name: &str,
         _is_buy: bool,
     ) -> Result<Vec<Instruction>> {
         // do anything you want here
@@ -42,7 +42,7 @@ impl InstructionMiddleware for CustomMiddleware {
     fn process_full_instructions(
         &self,
         full_instructions: Vec<Instruction>,
-        _protocol_name: String,
+        _protocol_name: &str,
         _is_buy: bool,
     ) -> Result<Vec<Instruction>> {
         // do anything you want here

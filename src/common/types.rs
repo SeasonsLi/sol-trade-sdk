@@ -70,6 +70,10 @@ pub struct TradeConfig {
     pub use_seed_optimize: bool,
     /// Whether to pin parallel submit tasks to CPU cores (can reduce latency; set false in containers). Default true.
     pub use_core_affinity: bool,
+    /// Use dedicated OS threads for sender pool (opt-in). When true, N threads run only send work; default N=18. Reduces scheduling contention when sending many txs. Default false.
+    pub use_dedicated_sender_threads: bool,
+    /// When use_dedicated_sender_threads is true, core indices to pin each sender thread to. If None or empty, N=SWQOS_DEDICATED_DEFAULT_THREADS with no affinity. If Some(ids), N=ids.len() and threads are pinned to these cores. Arc avoids cloning the Vec when building params.
+    pub sender_thread_cores: Option<std::sync::Arc<Vec<usize>>>,
     /// Whether to output all SDK logs (timing, SWQOS submit/confirm, WSOL, blacklist, etc.). Default true.
     pub log_enabled: bool,
     /// Whether to check minimum tip per SWQOS provider (filter out configs below min). Default false to save latency.
@@ -93,6 +97,8 @@ impl TradeConfig {
             create_wsol_ata_on_startup: true, // default: check and create on startup
             use_seed_optimize: true,          // default: use seed optimization
             use_core_affinity: true,          // default: pin parallel submit tasks to cores
+            use_dedicated_sender_threads: false, // default: use tokio worker pool
+            sender_thread_cores: None,        // when dedicated threads enabled, which cores to pin (None => default count, no affinity)
             log_enabled: true,                // default: enable all SDK logs
             check_min_tip: false,             // default: skip min tip check to reduce latency
         }

@@ -56,7 +56,8 @@ pub struct SwapParams {
     pub wait_transaction_confirmed: bool,
     pub protocol_params: DexParamEnum,
     pub open_seed_optimize: bool,
-    pub swqos_clients: Vec<Arc<SwqosClient>>,
+    /// Arc<Vec<..>> so cloning from infrastructure is a single Arc clone.
+    pub swqos_clients: Arc<Vec<Arc<SwqosClient>>>,
     pub middleware_manager: Option<Arc<MiddlewareManager>>,
     pub durable_nonce: Option<DurableNonceInfo>,
     pub with_tip: bool,
@@ -71,6 +72,10 @@ pub struct SwapParams {
     pub log_enabled: bool,
     /// Whether to pin parallel submit tasks to cores (from TradeConfig.use_core_affinity).
     pub use_core_affinity: bool,
+    /// Use dedicated sender threads (from TradeConfig.use_dedicated_sender_threads).
+    pub use_dedicated_sender_threads: bool,
+    /// Core indices for dedicated sender threads (from TradeConfig.sender_thread_cores). Arc avoids cloning the Vec on hot path.
+    pub sender_thread_cores: Option<Arc<Vec<usize>>>,
     /// Whether to check minimum tip per SWQOS (from TradeConfig.check_min_tip). When false, skip filter for lower latency.
     pub check_min_tip: bool,
     /// Optional event receive time in microseconds (same scale as sol-parser-sdk clock::now_micros). Used as timing start when log_enabled.
