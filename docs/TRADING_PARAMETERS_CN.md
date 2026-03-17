@@ -30,7 +30,7 @@
 | 参数 | 类型 | 必需 | 描述 |
 |------|------|------|------|
 | `address_lookup_table_account` | `Option<Pubkey>` | ❌ | 用于交易优化的地址查找表 |
-| `wait_transaction_confirmed` | `bool` | ✅ | 是否等待交易确认 |
+| `wait_tx_confirmed` | `bool` | ✅ | 是否等待交易确认 |
 | `create_input_token_ata` | `bool` | ✅ | 是否创建输入代币关联代币账户 |
 | `close_input_token_ata` | `bool` | ✅ | 交易后是否关闭输入代币 ATA |
 | `create_mint_ata` | `bool` | ✅ | 是否创建代币 mint ATA |
@@ -62,7 +62,7 @@
 | 参数 | 类型 | 必需 | 描述 |
 |------|------|------|------|
 | `address_lookup_table_account` | `Option<AddressLookupTableAccount>` | ❌ | 用于交易优化的地址查找表 |
-| `wait_transaction_confirmed` | `bool` | ✅ | 是否等待交易确认 |
+| `wait_tx_confirmed` | `bool` | ✅ | 是否等待交易确认 |
 | `create_output_token_ata` | `bool` | ✅ | 是否创建输出代币关联代币账户 |
 | `close_output_token_ata` | `bool` | ✅ | 交易后是否关闭输出代币 ATA |
 | `durable_nonce` | `Option<DurableNonceInfo>` | ❌ | 持久 nonce 信息，包含 nonce 账户和当前 nonce 值 |
@@ -88,7 +88,7 @@
 这些参数控制交易的处理方式：
 
 - **slippage_basis_points**: 控制可接受的价格滑点
-- **wait_transaction_confirmed**: 控制是否等待确认
+- **wait_tx_confirmed**: 控制是否等待确认
 
 ### 🔧 账户管理参数
 

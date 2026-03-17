@@ -277,7 +277,7 @@ pub struct TradeBuyParams {
     /// Optional address lookup table for transaction size optimization
     pub address_lookup_table_account: Option<AddressLookupTableAccount>,
     /// Whether to wait for transaction confirmation before returning
-    pub wait_transaction_confirmed: bool,
+    pub wait_tx_confirmed: bool,
     /// Whether to create input token associated token account
     pub create_input_token_ata: bool,
     /// Whether to close input token associated token account after trade
@@ -328,7 +328,7 @@ pub struct TradeSellParams {
     /// Optional address lookup table for transaction size optimization
     pub address_lookup_table_account: Option<AddressLookupTableAccount>,
     /// Whether to wait for transaction confirmation before returning
-    pub wait_transaction_confirmed: bool,
+    pub wait_tx_confirmed: bool,
     /// Whether to create output token associated token account
     pub create_output_token_ata: bool,
     /// Whether to close output token associated token account after trade
@@ -760,7 +760,7 @@ impl TradingClient {
             slippage_basis_points: params.slippage_basis_points,
             address_lookup_table_account: params.address_lookup_table_account,
             recent_blockhash: params.recent_blockhash,
-            wait_transaction_confirmed: params.wait_transaction_confirmed,
+            wait_tx_confirmed: params.wait_tx_confirmed,
             protocol_params,
             open_seed_optimize: self.use_seed_optimize, // 使用全局seed优化配置
             swqos_clients: self.infrastructure.swqos_clients.clone(),
@@ -867,7 +867,7 @@ impl TradingClient {
             slippage_basis_points: params.slippage_basis_points,
             address_lookup_table_account: params.address_lookup_table_account,
             recent_blockhash: params.recent_blockhash,
-            wait_transaction_confirmed: params.wait_transaction_confirmed,
+            wait_tx_confirmed: params.wait_tx_confirmed,
             protocol_params,
             with_tip: params.with_tip,
             open_seed_optimize: self.use_seed_optimize, // 使用全局seed优化配置

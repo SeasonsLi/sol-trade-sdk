@@ -172,15 +172,12 @@ impl BlockRazorClient {
         if status.is_success() {
             let _ = response.bytes().await;
             if crate::common::sdk_log::sdk_log_enabled() {
-                println!(" [blockrazor] {} submitted: {:?}", trade_type, start_time.elapsed());
+                crate::common::sdk_log::log_swqos_submitted("blockrazor", trade_type, start_time.elapsed());
             }
         } else {
             let body = response.text().await.unwrap_or_default();
             if crate::common::sdk_log::sdk_log_enabled() {
-                eprintln!(
-                    " [blockrazor] {} submission failed: status {} body: {}",
-                    trade_type, status, body
-                );
+                crate::common::sdk_log::log_swqos_submission_failed("blockrazor", trade_type, start_time.elapsed(), format!("status {} body: {}", status, body));
             }
             return Err(anyhow::anyhow!(
                 "BlockRazor sendTransaction failed: status {} body: {}",
@@ -196,9 +193,11 @@ impl BlockRazorClient {
                 if crate::common::sdk_log::sdk_log_enabled() {
                     println!(" signature: {:?}", signature);
                     println!(
-                        " [blockrazor] {} confirmation failed: {:?}",
+                        " [{:width$}] {} confirmation failed: {:?}",
+                        "blockrazor",
                         trade_type,
-                        start_time.elapsed()
+                        start_time.elapsed(),
+                        width = crate::common::sdk_log::SWQOS_LABEL_WIDTH
                     );
                 }
                 return Err(e);
@@ -206,7 +205,7 @@ impl BlockRazorClient {
         }
         if wait_confirmation && crate::common::sdk_log::sdk_log_enabled() {
             println!(" signature: {:?}", signature);
-            println!(" [blockrazor] {} confirmed: {:?}", trade_type, start_time.elapsed());
+            println!(" [{:width$}] {} confirmed: {:?}", "blockrazor", trade_type, start_time.elapsed(), width = crate::common::sdk_log::SWQOS_LABEL_WIDTH);
         }
 
         Ok(())

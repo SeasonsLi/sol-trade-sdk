@@ -2,7 +2,7 @@ use crate::swqos::common::{default_http_client_builder, poll_transaction_confirm
 use rand::seq::IndexedRandom;
 use reqwest::Client;
 use std::{sync::Arc, time::Instant};
-use tracing::{error, info, warn};
+use tracing::warn;
 
 use crate::swqos::SwqosClientTrait;
 use crate::swqos::{SwqosType, TradeType};
@@ -193,15 +193,26 @@ impl AstralaneClient {
                 let status = response.status();
                 let _ = response.bytes().await;
                 if status.is_success() {
-                    info!(target: "sol_trade_sdk", "[astralane] {} submitted: {:?}", trade_type, start_time.elapsed());
+                    if crate::common::sdk_log::sdk_log_enabled() {
+                        crate::common::sdk_log::log_swqos_submitted("Astralane", trade_type, start_time.elapsed());
+                    }
                 } else {
-                    error!(target: "sol_trade_sdk", "[astralane] {} submission failed: status {}", trade_type, status);
+                    if crate::common::sdk_log::sdk_log_enabled() {
+                        crate::common::sdk_log::log_swqos_submission_failed("Astralane", trade_type, start_time.elapsed(), format!("status {}", status));
+                    }
                     return Err(anyhow::anyhow!("Astralane sendTransaction failed: {}", status));
                 }
             }
             AstralaneBackend::Quic(quic) => {
-                quic.send_transaction(&body_bytes).await?;
-                info!(target: "sol_trade_sdk", "[astralane-quic] {} submitted: {:?}", trade_type, start_time.elapsed());
+                if let Err(e) = quic.send_transaction(&body_bytes).await {
+                    if crate::common::sdk_log::sdk_log_enabled() {
+                        crate::common::sdk_log::log_swqos_submission_failed("Astralane", trade_type, start_time.elapsed(), &e);
+                    }
+                    return Err(e);
+                }
+                if crate::common::sdk_log::sdk_log_enabled() {
+                    crate::common::sdk_log::log_swqos_submitted("Astralane", trade_type, start_time.elapsed());
+                }
             }
         }
 
@@ -209,14 +220,16 @@ impl AstralaneClient {
         match poll_transaction_confirmation(&self.rpc_client, *signature, wait_confirmation).await {
             Ok(_) => (),
             Err(e) => {
-                info!(target: "sol_trade_sdk", "signature: {:?}", signature);
-                error!(target: "sol_trade_sdk", "[astralane] {} confirmation failed: {:?}", trade_type, start_time.elapsed());
+                if crate::common::sdk_log::sdk_log_enabled() {
+                    println!(" signature: {:?}", signature);
+                    println!(" [{:width$}] {} confirmation failed: {:?}", "Astralane", trade_type, start_time.elapsed(), width = crate::common::sdk_log::SWQOS_LABEL_WIDTH);
+                }
                 return Err(e);
             }
         }
-        if wait_confirmation {
-            info!(target: "sol_trade_sdk", "signature: {:?}", signature);
-            info!(target: "sol_trade_sdk", "[astralane] {} confirmed: {:?}", trade_type, start_time.elapsed());
+        if wait_confirmation && crate::common::sdk_log::sdk_log_enabled() {
+            println!(" signature: {:?}", signature);
+            println!(" [{:width$}] {} confirmed: {:?}", "Astralane", trade_type, start_time.elapsed(), width = crate::common::sdk_log::SWQOS_LABEL_WIDTH);
         }
         Ok(())
     }

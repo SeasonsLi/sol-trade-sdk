@@ -111,6 +111,28 @@ pub enum SwqosType {
 }
 
 impl SwqosType {
+    /// Label for log alignment; same as Debug output (e.g. "Soyas", "Speedlanding").
+    #[inline]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Jito => "Jito",
+            Self::NextBlock => "NextBlock",
+            Self::ZeroSlot => "ZeroSlot",
+            Self::Temporal => "Temporal",
+            Self::Bloxroute => "Bloxroute",
+            Self::Node1 => "Node1",
+            Self::FlashBlock => "FlashBlock",
+            Self::BlockRazor => "BlockRazor",
+            Self::Astralane => "Astralane",
+            Self::Stellium => "Stellium",
+            Self::Lightspeed => "Lightspeed",
+            Self::Soyas => "Soyas",
+            Self::Speedlanding => "Speedlanding",
+            Self::Helius => "Helius",
+            Self::Default => "Default",
+        }
+    }
+
     pub fn values() -> Vec<Self> {
         vec![
             Self::Jito,

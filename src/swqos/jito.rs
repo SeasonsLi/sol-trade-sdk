@@ -105,12 +105,12 @@ impl JitoClient {
 
         if let Ok(response_json) = serde_json::from_str::<serde_json::Value>(&response_text) {
             if response_json.get("result").is_some() {
-                println!(" [jito] {} submitted: {:?}", trade_type, start_time.elapsed());
+                crate::common::sdk_log::log_swqos_submitted("jito", trade_type, start_time.elapsed());
             } else if let Some(_error) = response_json.get("error") {
-                eprintln!(" [jito] {} submission failed: {:?}", trade_type, _error);
+                eprintln!(" [jito] {} submission failed after {:?}: {:?}", trade_type, start_time.elapsed(), _error);
             }
         } else {
-            eprintln!(" [jito] {} submission failed: {:?}", trade_type, response_text);
+            crate::common::sdk_log::log_swqos_submission_failed("jito", trade_type, start_time.elapsed(), response_text);
         }
 
         let start_time: Instant = Instant::now();
@@ -118,13 +118,13 @@ impl JitoClient {
             Ok(_) => (),
             Err(e) => {
                 println!(" signature: {:?}", signature);
-                println!(" [jito] {} confirmation failed: {:?}", trade_type, start_time.elapsed());
+                println!(" [{:width$}] {} confirmation failed: {:?}", "jito", trade_type, start_time.elapsed(), width = crate::common::sdk_log::SWQOS_LABEL_WIDTH);
                 return Err(e);
             }
         }
         if wait_confirmation {
             println!(" signature: {:?}", signature);
-            println!(" [jito] {} confirmed: {:?}", trade_type, start_time.elapsed());
+            println!(" [{:width$}] {} confirmed: {:?}", "jito", trade_type, start_time.elapsed(), width = crate::common::sdk_log::SWQOS_LABEL_WIDTH);
         }
 
         Ok(())
@@ -171,7 +171,7 @@ impl JitoClient {
             if response_json.get("result").is_some() {
                 println!(" jito {} submitted: {:?}", trade_type, start_time.elapsed());
             } else if let Some(_error) = response_json.get("error") {
-                eprintln!(" jito {} submission failed: {:?}", trade_type, _error);
+                eprintln!(" jito {} submission failed after {:?}: {:?}", trade_type, start_time.elapsed(), _error);
             }
         }
 

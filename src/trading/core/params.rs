@@ -62,7 +62,7 @@ pub struct SwapParams {
     pub slippage_basis_points: Option<u64>,
     pub address_lookup_table_account: Option<AddressLookupTableAccount>,
     pub recent_blockhash: Option<Hash>,
-    pub wait_transaction_confirmed: bool,
+    pub wait_tx_confirmed: bool,
     pub protocol_params: DexParamEnum,
     pub open_seed_optimize: bool,
     /// Arc<Vec<..>> so cloning from infrastructure is a single Arc clone.

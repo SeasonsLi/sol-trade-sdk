@@ -109,25 +109,35 @@ impl SwqosClientTrait for SoyasClient {
         let serialized_tx = bincode::serialize(transaction)?;
         let connection = self.connection.load_full();
         if Self::try_send_bytes(&connection, &serialized_tx).await.is_err() {
-            eprintln!(" [soyas] {} submission failed, reconnecting", trade_type);
+            if crate::common::sdk_log::sdk_log_enabled() {
+                    crate::common::sdk_log::log_swqos_submission_failed("Soyas", trade_type, start_time.elapsed(), "reconnecting");
+                }
             self.reconnect().await?;
             let connection = self.connection.load_full();
             if let Err(e) = Self::try_send_bytes(&connection, &serialized_tx).await {
-                eprintln!(" [soyas] {} submission failed: {:?}", trade_type, e);
+                if crate::common::sdk_log::sdk_log_enabled() {
+                    crate::common::sdk_log::log_swqos_submission_failed("Soyas", trade_type, start_time.elapsed(), &e);
+                }
                 return Err(e.into());
             }
         }
+        if crate::common::sdk_log::sdk_log_enabled() {
+            crate::common::sdk_log::log_swqos_submitted("Soyas", trade_type, start_time.elapsed());
+        }
+        let start_time = Instant::now();
         match poll_transaction_confirmation(&self.rpc_client, *signature, wait_confirmation).await {
             Ok(_) => (),
             Err(e) => {
-                println!(" signature: {:?}", signature);
-                println!(" [soyas] {} confirmation failed: {:?}", trade_type, start_time.elapsed());
+                if crate::common::sdk_log::sdk_log_enabled() {
+                    println!(" signature: {:?}", signature);
+                    println!(" [{:width$}] {} confirmation failed: {:?}", "Soyas", trade_type, start_time.elapsed(), width = crate::common::sdk_log::SWQOS_LABEL_WIDTH);
+                }
                 return Err(e);
             }
         }
-        if wait_confirmation {
+        if wait_confirmation && crate::common::sdk_log::sdk_log_enabled() {
             println!(" signature: {:?}", signature);
-            println!(" [soyas] {} confirmed: {:?}", trade_type, start_time.elapsed());
+            println!(" [{:width$}] {} confirmed: {:?}", "Soyas", trade_type, start_time.elapsed(), width = crate::common::sdk_log::SWQOS_LABEL_WIDTH);
         }
         Ok(())
     }

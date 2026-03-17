@@ -168,13 +168,13 @@ impl StelliumClient {
         if let Ok(response_json) = serde_json::from_str::<serde_json::Value>(&response_text) {
             if crate::common::sdk_log::sdk_log_enabled() {
                 if response_json.get("result").is_some() {
-                    println!(" [Stellium] {} submitted: {:?}", trade_type, start_time.elapsed());
+                    crate::common::sdk_log::log_swqos_submitted("Stellium", trade_type, start_time.elapsed());
                 } else if let Some(_error) = response_json.get("error") {
-                    eprintln!(" [Stellium] {} submission failed: {:?}", trade_type, _error);
+                    crate::common::sdk_log::log_swqos_submission_failed("Stellium", trade_type, start_time.elapsed(), _error);
                 }
             }
         } else if crate::common::sdk_log::sdk_log_enabled() {
-            eprintln!(" [Stellium] {} submission failed: {:?}", trade_type, response_text);
+            crate::common::sdk_log::log_swqos_submission_failed("Stellium", trade_type, start_time.elapsed(), response_text);
         }
 
         let start_time: Instant = Instant::now();
@@ -184,9 +184,11 @@ impl StelliumClient {
                 if crate::common::sdk_log::sdk_log_enabled() {
                     println!(" signature: {:?}", signature);
                     println!(
-                        " [Stellium] {} confirmation failed: {:?}",
+                        " [{:width$}] {} confirmation failed: {:?}",
+                        "Stellium",
                         trade_type,
-                        start_time.elapsed()
+                        start_time.elapsed(),
+                        width = crate::common::sdk_log::SWQOS_LABEL_WIDTH
                     );
                 }
                 return Err(e);
@@ -194,7 +196,7 @@ impl StelliumClient {
         }
         if wait_confirmation && crate::common::sdk_log::sdk_log_enabled() {
             println!(" signature: {:?}", signature);
-            println!(" [Stellium] {} confirmed: {:?}", trade_type, start_time.elapsed());
+            println!(" [{:width$}] {} confirmed: {:?}", "Stellium", trade_type, start_time.elapsed(), width = crate::common::sdk_log::SWQOS_LABEL_WIDTH);
         }
 
         Ok(())

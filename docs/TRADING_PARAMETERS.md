@@ -30,7 +30,7 @@ The `TradeBuyParams` struct contains all parameters required for executing buy o
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `address_lookup_table_account` | `Option<AddressLookupTableAccount>` | ❌ | Address lookup table for transaction optimization |
-| `wait_transaction_confirmed` | `bool` | ✅ | Whether to wait for transaction confirmation |
+| `wait_tx_confirmed` | `bool` | ✅ | Whether to wait for transaction confirmation |
 | `create_input_token_ata` | `bool` | ✅ | Whether to create input token Associated Token Account |
 | `close_input_token_ata` | `bool` | ✅ | Whether to close input token ATA after transaction |
 | `create_mint_ata` | `bool` | ✅ | Whether to create token mint ATA |
@@ -62,7 +62,7 @@ The `TradeSellParams` struct contains all parameters required for executing sell
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `address_lookup_table_account` | `Option<Pubkey>` | ❌ | Address lookup table for transaction optimization |
-| `wait_transaction_confirmed` | `bool` | ✅ | Whether to wait for transaction confirmation |
+| `wait_tx_confirmed` | `bool` | ✅ | Whether to wait for transaction confirmation |
 | `create_output_token_ata` | `bool` | ✅ | Whether to create output token Associated Token Account |
 | `close_output_token_ata` | `bool` | ✅ | Whether to close output token ATA after transaction |
 | `durable_nonce` | `Option<DurableNonceInfo>` | ❌ | Durable nonce information containing nonce account and current nonce value |
@@ -88,7 +88,7 @@ These parameters are essential for defining the basic trading operation:
 These parameters control how the transaction is processed:
 
 - **slippage_basis_points**: Controls acceptable price slippage
-- **wait_transaction_confirmed**: Controls whether to wait for confirmation
+- **wait_tx_confirmed**: Controls whether to wait for confirmation
 
 ### 🔧 Account Management Parameters
 

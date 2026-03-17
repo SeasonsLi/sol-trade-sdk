@@ -97,12 +97,12 @@ impl FlashBlockClient {
         // Parse response
         if let Ok(response_json) = serde_json::from_str::<serde_json::Value>(&response_text) {
             if response_json.get("success").is_some() || response_json.get("result").is_some() {
-                println!(" [FlashBlock] {} submitted: {:?}", trade_type, start_time.elapsed());
+                crate::common::sdk_log::log_swqos_submitted("FlashBlock", trade_type, start_time.elapsed());
             } else if let Some(_error) = response_json.get("error") {
-                eprintln!(" [FlashBlock] {} submission failed: {:?}", trade_type, _error);
+                eprintln!(" [FlashBlock] {} submission failed after {:?}: {:?}", trade_type, start_time.elapsed(), _error);
             }
         } else {
-            eprintln!(" [FlashBlock] {} submission failed: {:?}", trade_type, response_text);
+            crate::common::sdk_log::log_swqos_submission_failed("FlashBlock", trade_type, start_time.elapsed(), response_text);
         }
 
         let start_time: Instant = Instant::now();
@@ -111,16 +111,18 @@ impl FlashBlockClient {
             Err(e) => {
                 println!(" signature: {:?}", signature);
                 println!(
-                    " [FlashBlock] {} confirmation failed: {:?}",
+                    " [{:width$}] {} confirmation failed: {:?}",
+                    "FlashBlock",
                     trade_type,
-                    start_time.elapsed()
+                    start_time.elapsed(),
+                    width = crate::common::sdk_log::SWQOS_LABEL_WIDTH
                 );
                 return Err(e);
             }
         }
         if wait_confirmation {
             println!(" signature: {:?}", signature);
-            println!(" [FlashBlock] {} confirmed: {:?}", trade_type, start_time.elapsed());
+            println!(" [{:width$}] {} confirmed: {:?}", "FlashBlock", trade_type, start_time.elapsed(), width = crate::common::sdk_log::SWQOS_LABEL_WIDTH);
         }
 
         Ok(())

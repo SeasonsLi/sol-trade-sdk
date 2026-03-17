@@ -99,12 +99,12 @@ impl NextBlockClient {
 
         if let Ok(response_json) = serde_json::from_str::<serde_json::Value>(&response_text) {
             if response_json.get("result").is_some() {
-                println!(" [nextblock] {} submitted: {:?}", trade_type, start_time.elapsed());
+                crate::common::sdk_log::log_swqos_submitted("nextblock", trade_type, start_time.elapsed());
             } else if let Some(_error) = response_json.get("error") {
-                eprintln!(" [nextblock] {} submission failed: {:?}", trade_type, _error);
+                crate::common::sdk_log::log_swqos_submission_failed("nextblock", trade_type, start_time.elapsed(), _error);
             }
         } else {
-            eprintln!(" [nextblock] {} submission failed: {:?}", trade_type, response_text);
+            crate::common::sdk_log::log_swqos_submission_failed("nextblock", trade_type, start_time.elapsed(), response_text);
         }
 
         let start_time: Instant = Instant::now();
@@ -113,16 +113,18 @@ impl NextBlockClient {
             Err(e) => {
                 println!(" signature: {:?}", signature);
                 println!(
-                    " [nextblock] {} confirmation failed: {:?}",
+                    " [{:width$}] {} confirmation failed: {:?}",
+                    "nextblock",
                     trade_type,
-                    start_time.elapsed()
+                    start_time.elapsed(),
+                    width = crate::common::sdk_log::SWQOS_LABEL_WIDTH
                 );
                 return Err(e);
             }
         }
         if wait_confirmation {
             println!(" signature: {:?}", signature);
-            println!(" [nextblock] {} confirmed: {:?}", trade_type, start_time.elapsed());
+            println!(" [{:width$}] {} confirmed: {:?}", "nextblock", trade_type, start_time.elapsed(), width = crate::common::sdk_log::SWQOS_LABEL_WIDTH);
         }
 
         Ok(())
