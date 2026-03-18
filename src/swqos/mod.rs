@@ -352,14 +352,16 @@ impl SwqosConfig {
                 Ok(Arc::new(flashblock_client))
             }
             SwqosConfig::BlockRazor(auth_token, region, url, transport) => {
-                let use_http = transport.map_or(false, |t| t == SwqosTransport::Http);
+                // BlockRazor: transport=None 或 transport=Http 时使用 HTTP，否则使用 gRPC
+                // 默认使用 HTTP，避免 gRPC FRAME_SIZE_ERROR
+                let use_http = transport.map_or(true, |t| t == SwqosTransport::Http);
                 if use_http {
                     let endpoint = SwqosConfig::get_endpoint(SwqosType::BlockRazor, region, url);
                     let blockrazor_client =
                         BlockRazorClient::new_http(rpc_url.clone(), endpoint.to_string(), auth_token);
                     Ok(Arc::new(blockrazor_client))
                 } else {
-                    // Default to gRPC
+                    // 使用 gRPC 模式（用户明确指定了非 Http 的 transport）
                     let endpoint = SwqosConfig::get_endpoint(SwqosType::BlockRazor, region, url);
                     let blockrazor_client =
                         BlockRazorClient::new_grpc(rpc_url.clone(), endpoint.to_string(), auth_token).await?;

@@ -167,18 +167,33 @@ impl ZeroSlotClient {
         let status = response.status();
         let response_text = response.text().await?;
 
-        // Binary-Tx returns plain text responses with specific status codes
-        // 200: ok - transaction submitted successfully
+        // Binary-Tx returns JSON-RPC 2.0 format responses
+        // 200: success with result field containing signature, or error field with code/message
         // 403: api-key error (null, doesn't exist, or expired)
         // 419: rate limit exceeded
         // 500: submission failed
         match status.as_u16() {
             200 => {
-                if response_text.trim() == "ok" {
-                    crate::common::sdk_log::log_swqos_submitted("0slot", trade_type, start_time.elapsed());
+                if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&response_text) {
+                    if json_value.get("result").is_some() {
+                        crate::common::sdk_log::log_swqos_submitted("0slot", trade_type, start_time.elapsed());
+                    } else if let Some(error) = json_value.get("error") {
+                        let code = error.get("code")
+                            .and_then(|c| c.as_i64())
+                            .map(|c| c.to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        let message = error.get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("unknown error");
+                        crate::common::sdk_log::log_swqos_submission_failed("0slot", trade_type, start_time.elapsed(), format!("code {}: {}", code, message));
+                        return Err(anyhow::anyhow!("0slot Binary-Tx error: {}", message));
+                    } else {
+                        crate::common::sdk_log::log_swqos_submission_failed("0slot", trade_type, start_time.elapsed(), format!("unexpected JSON: {}", response_text));
+                        return Err(anyhow::anyhow!("0slot Binary-Tx unexpected JSON: {}", response_text));
+                    }
                 } else {
-                    crate::common::sdk_log::log_swqos_submission_failed("0slot", trade_type, start_time.elapsed(), format!("unexpected response: {}", response_text));
-                    return Err(anyhow::anyhow!("0slot Binary-Tx unexpected response: {}", response_text));
+                    crate::common::sdk_log::log_swqos_submission_failed("0slot", trade_type, start_time.elapsed(), format!("invalid JSON: {}", response_text));
+                    return Err(anyhow::anyhow!("0slot Binary-Tx invalid JSON: {}", response_text));
                 }
             }
             403 => {

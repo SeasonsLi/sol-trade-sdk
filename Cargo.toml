@@ -1,6 +1,6 @@
 [package]
 name = "sol-trade-sdk"
-version = "3.6.5"
+version = "4.0.0"
 edition = "2021"
 authors = [
     "William <byteblock6@gmail.com>",
@@ -134,6 +134,10 @@ incremental = true         # 增量编译 - 大幅加速重新编译
 [profile.dev]
 opt-level = 1              # 开发时适度优化
 overflow-checks = true     # 开发时启用溢出检查
+
+# 🚀 构建依赖
+# 注意：proto 代码已预生成在 src/swqos/pb/serverpb.rs
+# 开发者如需重新生成代码，请运行 gen_proto 目录下的工具
 
 # 🚀 性能关键依赖的特殊优化
 [profile.release.package.solana-sdk]

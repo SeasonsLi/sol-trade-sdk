@@ -17,60 +17,66 @@ use crate::{common::SolanaRpcClient, constants::swqos::BLOCKRAZOR_TIP_ACCOUNTS};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::task::JoinHandle;
-use tonic::metadata::AsciiMetadataValue;
 use tonic::transport::Channel;
+use tonic::metadata::AsciiMetadataValue;
 
-// Manual gRPC message types for BlockRazor serverpb.proto
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct HealthRequest {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HealthResponse {
-    pub status: String,
+// Include pre-generated gRPC code
+pub mod serverpb {
+    include!("pb/serverpb.rs");
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SendRequest {
-    pub transaction: String,
-    pub mode: String,
-    pub safe_window: Option<i32>,
-    pub revert_protection: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SendResponse {
-    pub signature: String,
-}
-
-// Mock gRPC client using tonic
+// gRPC client wrapper
 #[derive(Clone)]
 pub struct BlockRazorGrpcClient {
     channel: Channel,
+    auth_token: String,
 }
 
 impl BlockRazorGrpcClient {
-    pub fn new(channel: Channel) -> Self {
-        Self { channel }
+    pub fn new(channel: Channel, auth_token: String) -> Self {
+        Self { channel, auth_token }
     }
 
-    pub async fn get_health(&self) -> Result<HealthResponse> {
-        // For now, use a simple HTTP request for health check
-        let http_client = Client::new();
-        let response = http_client
-            .get("http://health.example.com") // Placeholder
-            .send()
-            .await;
-        Ok(HealthResponse {
-            status: "ok".to_string(),
-        })
+    pub async fn get_health(&self) -> Result<String> {
+        let mut client = serverpb::server_client::ServerClient::new(self.channel.clone());
+        let apikey = AsciiMetadataValue::try_from(self.auth_token.as_str())
+            .map_err(|e| anyhow::anyhow!("Invalid API key format: {}", e))?;
+
+        let mut request = tonic::Request::new(serverpb::HealthRequest {});
+        request.metadata_mut().insert("apikey", apikey);
+
+        let response = client.get_health(request).await
+            .map_err(|e| anyhow::anyhow!("gRPC health check failed: {}", e))?;
+        Ok(response.into_inner().status)
     }
 
-    pub async fn send_transaction(&self, _request: SendRequest) -> Result<SendResponse> {
-        // For now, this is a placeholder implementation
-        // Real implementation would use tonic-generated client
-        Ok(SendResponse {
-            signature: "placeholder".to_string(),
-        })
+    pub async fn send_transaction(
+        &self,
+        transaction: String,
+        mode: String,
+        safe_window: Option<i32>,
+        revert_protection: bool,
+    ) -> Result<String> {
+        // 检查交易数据大小
+        if crate::common::sdk_log::sdk_log_enabled() {
+            eprintln!("BlockRazor transaction size: {} bytes", transaction.len());
+        }
+
+        let mut client = serverpb::server_client::ServerClient::new(self.channel.clone());
+        let apikey = AsciiMetadataValue::try_from(self.auth_token.as_str())
+            .map_err(|e| anyhow::anyhow!("Invalid API key format: {}", e))?;
+
+        let mut request = tonic::Request::new(serverpb::SendRequest {
+            transaction,
+            mode: String::from(mode),
+            safe_window,
+            revert_protection,
+        });
+        request.metadata_mut().insert("apikey", apikey);
+
+        let response = client.send_transaction(request).await
+            .map_err(|e| anyhow::anyhow!("gRPC send transaction failed: {}", e))?;
+        Ok(response.into_inner().signature)
     }
 }
 
@@ -135,22 +141,23 @@ impl SwqosClientTrait for BlockRazorClient {
 }
 
 impl BlockRazorClient {
-    /// 使用 gRPC 提交（默认方式）。
     pub async fn new(rpc_url: String, endpoint: String, auth_token: String) -> Result<Self> {
-        Self::new_grpc(rpc_url, endpoint, auth_token).await
+        // 默认使用 HTTP 模式，避免 gRPC FRAME_SIZE_ERROR
+        Ok(Self::new_http(rpc_url, endpoint, auth_token))
     }
 
-    /// 使用 gRPC 提交。
     pub async fn new_grpc(rpc_url: String, endpoint: String, auth_token: String) -> Result<Self> {
         let rpc_client = SolanaRpcClient::new(rpc_url);
 
+        // 配置 Channel，增加连接超时
         let channel = tonic::transport::Channel::from_shared(endpoint.clone())
             .map_err(|e| anyhow::anyhow!("Invalid gRPC endpoint: {}", e))?
+            .timeout(Duration::from_secs(30))
             .connect()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to connect to gRPC endpoint: {}", e))?;
 
-        let grpc_client = Arc::new(BlockRazorGrpcClient::new(channel));
+        let grpc_client = Arc::new(BlockRazorGrpcClient::new(channel, auth_token.clone()));
         let ping_handle = Arc::new(tokio::sync::Mutex::new(None));
         let stop_ping = Arc::new(AtomicBool::new(false));
 
@@ -173,10 +180,8 @@ impl BlockRazorClient {
         Ok(client)
     }
 
-    /// 使用 HTTP 提交。
     pub fn new_http(rpc_url: String, endpoint: String, auth_token: String) -> Self {
         let rpc_client = SolanaRpcClient::new(rpc_url);
-        // 官方文档：請求中唯一允許的 header 是 Content-Type: text/plain；避免默认 User-Agent 等导致 500
         let http_client = default_http_client_builder().user_agent("").build().unwrap();
         let ping_handle = Arc::new(tokio::sync::Mutex::new(None));
         let stop_ping = Arc::new(AtomicBool::new(false));
@@ -213,13 +218,12 @@ impl BlockRazorClient {
                 let stop_ping = stop_ping.clone();
 
                 let handle = tokio::spawn(async move {
-                    // Immediate first ping to warm connection and reduce first-submit cold start latency
                     if let Err(e) = grpc_client.get_health().await {
                         if crate::common::sdk_log::sdk_log_enabled() {
                             eprintln!("BlockRazor gRPC ping request failed: {}", e);
                         }
                     }
-                    let mut interval = tokio::time::interval(Duration::from_secs(30)); // 30s keepalive to avoid server ~5min idle close
+                    let mut interval = tokio::time::interval(Duration::from_secs(30));
                     loop {
                         interval.tick().await;
                         if stop_ping.load(Ordering::Relaxed) {
@@ -253,13 +257,12 @@ impl BlockRazorClient {
                 let stop_ping = stop_ping.clone();
 
                 let handle = tokio::spawn(async move {
-                    // Immediate first ping to warm connection and reduce first-submit cold start latency
                     if let Err(e) = Self::send_http_ping(&http_client, &endpoint, &auth_token).await {
                         if crate::common::sdk_log::sdk_log_enabled() {
                             eprintln!("BlockRazor HTTP ping request failed: {}", e);
                         }
                     }
-                    let mut interval = tokio::time::interval(Duration::from_secs(30)); // 30s keepalive to avoid server ~5min idle close
+                    let mut interval = tokio::time::interval(Duration::from_secs(30));
                     loop {
                         interval.tick().await;
                         if stop_ping.load(Ordering::Relaxed) {
@@ -282,7 +285,6 @@ impl BlockRazorClient {
         }
     }
 
-    /// Send HTTP ping request: POST /v2/health?auth=... (Keep Alive). Only required param: auth.
     async fn send_http_ping(
         http_client: &Client,
         endpoint: &str,
@@ -315,24 +317,21 @@ impl BlockRazorClient {
 
         match &self.backend {
             BlockRazorBackend::Grpc {
-                auth_token,
                 grpc_client,
                 ..
             } => {
                 let (content, _signature) =
                     serialize_transaction_and_encode(transaction, UiTransactionEncoding::Base64)?;
 
-                let request = SendRequest {
-                    transaction: content,
-                    mode: "fast".to_string(),
-                    safe_window: None,
-                    revert_protection: false,
-                };
-
-                let response = grpc_client.send_transaction(request).await;
-                match response {
-                    Ok(resp) => {
-                        if !resp.signature.is_empty() {
+                let signature = grpc_client.send_transaction(
+                    content,
+                    "fast".to_string(),
+                    None,
+                    false,
+                ).await;
+                match signature {
+                    Ok(sig) => {
+                        if !sig.is_empty() {
                             if crate::common::sdk_log::sdk_log_enabled() {
                                 crate::common::sdk_log::log_swqos_submitted("BlockRazor", trade_type, start_time.elapsed());
                             }
@@ -389,7 +388,6 @@ impl BlockRazorClient {
         }
 
         let start_time = Instant::now();
-        // Get signature from transaction
         let signature = transaction.signatures[0];
 
         match poll_transaction_confirmation(&self.rpc_client, signature, wait_confirmation).await {
