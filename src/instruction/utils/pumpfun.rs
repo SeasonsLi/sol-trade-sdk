@@ -255,6 +255,32 @@ pub fn get_standard_fee_recipient_meta_random() -> AccountMeta {
     }
 }
 
+/// Use gRPC/event fee recipient only if authorized for this bonding curve mode; otherwise pick
+/// randomly from the same pool as `@pump-fun/pump-sdk` `getFeeRecipient` (avoids 6000 NotAuthorized
+/// when event fee is from a different mode, e.g. standard AMM fee on a Mayhem coin).
+#[inline]
+pub fn pump_fun_fee_recipient_meta(from_event: Pubkey, is_mayhem_mode: bool) -> AccountMeta {
+    if from_event != Pubkey::default() {
+        let authorized = if is_mayhem_mode {
+            is_mayhem_fee_recipient(&from_event)
+        } else {
+            from_event == global_constants::FEE_RECIPIENT || is_amm_fee_recipient(&from_event)
+        };
+        if authorized {
+            return AccountMeta {
+                pubkey: from_event,
+                is_signer: false,
+                is_writable: true,
+            };
+        }
+    }
+    if is_mayhem_mode {
+        get_mayhem_fee_recipient_meta_random()
+    } else {
+        get_standard_fee_recipient_meta_random()
+    }
+}
+
 pub struct Symbol;
 
 impl Symbol {
@@ -314,6 +340,20 @@ pub fn get_creator_vault_pda(creator: &Pubkey) -> Option<Pubkey> {
             pda.map(|pubkey| pubkey.0)
         },
     )
+}
+
+/// Creator vault for buy/sell must be `PDA(["creator-vault", bonding_curve.creator])` (same as on-chain).
+/// Use gRPC `from_event` only when it equals that PDA; if it differs (wrong mint / stale parse), use derived.
+#[inline]
+pub fn resolve_creator_vault_for_ix(creator: &Pubkey, from_event: Pubkey) -> Option<Pubkey> {
+    let derived = get_creator_vault_pda(creator)?;
+    if from_event == Pubkey::default() {
+        Some(derived)
+    } else if from_event == derived {
+        Some(from_event)
+    } else {
+        Some(derived)
+    }
 }
 
 #[inline]

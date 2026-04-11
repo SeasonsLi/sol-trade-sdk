@@ -127,7 +127,7 @@ impl std::fmt::Debug for SwapParams {
 pub struct PumpFunParams {
     pub bonding_curve: Arc<BondingCurveAccount>,
     pub associated_bonding_curve: Pubkey,
-    /// From events/parsed ix when set; else derived from `bonding_curve.creator`. Buy/sell prefer non-default.
+    /// `PDA(["creator-vault", bonding_curve.creator])`; from_trade resolves when event vault mismatches.
     pub creator_vault: Pubkey,
     pub token_program: Pubkey,
     /// Whether to close token account when selling, only effective during sell operations
@@ -182,12 +182,11 @@ impl PumpFunParams {
             is_mayhem_mode,
             is_cashback_coin,
         );
-        let creator_vault_resolved = if creator_vault != Pubkey::default() {
-            creator_vault
-        } else {
-            crate::instruction::utils::pumpfun::get_creator_vault_pda(&bonding_curve_account.creator)
-                .unwrap_or_default()
-        };
+        let creator_vault_resolved = crate::instruction::utils::pumpfun::resolve_creator_vault_for_ix(
+            &bonding_curve_account.creator,
+            creator_vault,
+        )
+        .unwrap_or_default();
         Self {
             bonding_curve: Arc::new(bonding_curve_account),
             associated_bonding_curve: associated_bonding_curve,
@@ -230,12 +229,11 @@ impl PumpFunParams {
             is_mayhem_mode,
             is_cashback_coin,
         );
-        let creator_vault_resolved = if creator_vault != Pubkey::default() {
-            creator_vault
-        } else {
-            crate::instruction::utils::pumpfun::get_creator_vault_pda(&bonding_curve.creator)
-                .unwrap_or_default()
-        };
+        let creator_vault_resolved = crate::instruction::utils::pumpfun::resolve_creator_vault_for_ix(
+            &bonding_curve.creator,
+            creator_vault,
+        )
+        .unwrap_or_default();
         Self {
             bonding_curve: Arc::new(bonding_curve),
             associated_bonding_curve: associated_bonding_curve,

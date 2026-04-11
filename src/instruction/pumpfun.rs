@@ -8,9 +8,9 @@ use crate::{
 };
 use crate::{
     instruction::utils::pumpfun::{
-        accounts, get_bonding_curve_pda, get_bonding_curve_v2_pda, get_creator_vault_pda,
-        get_mayhem_fee_recipient_meta_random, get_standard_fee_recipient_meta_random,
-        get_user_volume_accumulator_pda,
+        accounts,         get_bonding_curve_pda, get_bonding_curve_v2_pda,
+        get_user_volume_accumulator_pda, pump_fun_fee_recipient_meta,
+        resolve_creator_vault_for_ix,
         global_constants::{self},
         BUY_DISCRIMINATOR, BUY_EXACT_SOL_IN_DISCRIMINATOR, SELL_DISCRIMINATOR,
     },
@@ -43,19 +43,16 @@ impl InstructionBuilder for PumpFunInstructionBuilder {
         }
 
         let bonding_curve = &protocol_params.bonding_curve;
-        // creator_vault must match PDA(["creator-vault", bonding_curve.creator_on_chain]). Events/gRPC
-        // sometimes have a stale `creator` but a correct `creator_vault` from parsed ix; prefer non-default.
+        // creator_vault must be PDA(creator) per bonding curve. Event vault: use only if == derived;
+        // if stream sends a mismatched vault (wrong token / stale), fall back to derived.
         let creator = bonding_curve.creator;
-        let creator_vault_pda = if protocol_params.creator_vault != Pubkey::default() {
-            protocol_params.creator_vault
-        } else {
-            get_creator_vault_pda(&creator).ok_or_else(|| {
+        let creator_vault_pda = resolve_creator_vault_for_ix(&creator, protocol_params.creator_vault)
+            .ok_or_else(|| {
                 anyhow!(
                     "creator_vault PDA derivation failed (creator={})",
                     creator
                 )
-            })?
-        };
+            })?;
 
         // ========================================
         // Trade calculation and account address preparation
@@ -156,19 +153,9 @@ impl InstructionBuilder for PumpFunInstructionBuilder {
             buy_data[24..26].copy_from_slice(&track_volume);
         }
 
-        // Fee recipient: prefer gRPC/event pubkey (matches live trades); else @pump-fun/pump-sdk getFeeRecipient.
+        // Fee recipient: event hint only if allowed for `is_mayhem_mode` (else 6000 NotAuthorized).
         let fee_recipient_meta =
-            if protocol_params.fee_recipient != Pubkey::default() {
-                AccountMeta {
-                    pubkey: protocol_params.fee_recipient,
-                    is_signer: false,
-                    is_writable: true,
-                }
-            } else if is_mayhem_mode {
-                get_mayhem_fee_recipient_meta_random()
-            } else {
-                get_standard_fee_recipient_meta_random()
-            };
+            pump_fun_fee_recipient_meta(protocol_params.fee_recipient, is_mayhem_mode);
 
         let bonding_curve_v2 = get_bonding_curve_v2_pda(&params.output_mint).ok_or_else(|| {
             anyhow!("bonding_curve_v2 PDA derivation failed for mint {}", params.output_mint)
@@ -219,16 +206,13 @@ impl InstructionBuilder for PumpFunInstructionBuilder {
 
         let bonding_curve = &protocol_params.bonding_curve;
         let creator = bonding_curve.creator;
-        let creator_vault_pda = if protocol_params.creator_vault != Pubkey::default() {
-            protocol_params.creator_vault
-        } else {
-            get_creator_vault_pda(&creator).ok_or_else(|| {
+        let creator_vault_pda = resolve_creator_vault_for_ix(&creator, protocol_params.creator_vault)
+            .ok_or_else(|| {
                 anyhow!(
                     "creator_vault PDA derivation failed (creator={})",
                     creator
                 )
-            })?
-        };
+            })?;
 
         // ========================================
         // Trade calculation and account address preparation
@@ -295,17 +279,7 @@ impl InstructionBuilder for PumpFunInstructionBuilder {
         sell_data[16..24].copy_from_slice(&min_sol_output.to_le_bytes());
 
         let fee_recipient_meta =
-            if protocol_params.fee_recipient != Pubkey::default() {
-                AccountMeta {
-                    pubkey: protocol_params.fee_recipient,
-                    is_signer: false,
-                    is_writable: true,
-                }
-            } else if is_mayhem_mode {
-                get_mayhem_fee_recipient_meta_random()
-            } else {
-                get_standard_fee_recipient_meta_random()
-            };
+            pump_fun_fee_recipient_meta(protocol_params.fee_recipient, is_mayhem_mode);
 
         let mut accounts: Vec<AccountMeta> = vec![
             global_constants::GLOBAL_ACCOUNT_META,
