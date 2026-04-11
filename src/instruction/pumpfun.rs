@@ -8,7 +8,7 @@ use crate::{
 };
 use crate::{
     instruction::utils::pumpfun::{
-        accounts,         get_bonding_curve_pda, get_bonding_curve_v2_pda,
+        accounts, get_bonding_curve_pda, get_bonding_curve_v2_pda,
         get_user_volume_accumulator_pda, pump_fun_fee_recipient_meta,
         resolve_creator_vault_for_ix,
         global_constants::{self},
@@ -77,13 +77,11 @@ impl InstructionBuilder for PumpFunInstructionBuilder {
             params.slippage_basis_points.unwrap_or(DEFAULT_SLIPPAGE),
         );
 
-        let bonding_curve_addr = if bonding_curve.account == Pubkey::default() {
-            get_bonding_curve_pda(&params.output_mint).ok_or_else(|| {
-                anyhow!("bonding_curve PDA derivation failed for mint {}", params.output_mint)
-            })?
-        } else {
-            bonding_curve.account
-        };
+        // 始终用 mint 推导 canonical bonding curve PDA。缓存里的 `bonding_curve.account` 可能指向其它池子，
+        // 会导致链上读到错误 `creator`，从而 creator_vault seeds 与传入的 vault 不一致（Anchor 2006）。
+        let bonding_curve_addr = get_bonding_curve_pda(&params.output_mint).ok_or_else(|| {
+            anyhow!("bonding_curve PDA derivation failed for mint {}", params.output_mint)
+        })?;
 
         // Determine token program based on mayhem mode
         let is_mayhem_mode = bonding_curve.is_mayhem_mode;
@@ -95,15 +93,11 @@ impl InstructionBuilder for PumpFunInstructionBuilder {
         };
 
         let associated_bonding_curve =
-            if protocol_params.associated_bonding_curve == Pubkey::default() {
-                crate::common::fast_fn::get_associated_token_address_with_program_id_fast(
-                    &bonding_curve_addr,
-                    &params.output_mint,
-                    &token_program,
-                )
-            } else {
-                protocol_params.associated_bonding_curve
-            };
+            crate::common::fast_fn::get_associated_token_address_with_program_id_fast(
+                &bonding_curve_addr,
+                &params.output_mint,
+                &token_program,
+            );
 
         let user_token_account =
             crate::common::fast_fn::get_associated_token_address_with_program_id_fast_use_seed(
@@ -157,7 +151,7 @@ impl InstructionBuilder for PumpFunInstructionBuilder {
             buy_data[24..26].copy_from_slice(&track_volume);
         }
 
-        // Fee recipient: event hint only if allowed for `is_mayhem_mode` (else 6000 NotAuthorized).
+        // Fee recipient: gRPC/ShredStream 填入的 `PumpFunParams.fee_recipient`（同笔 create_v2+buy 或 trade 日志）优先；热路径无 RPC。
         let fee_recipient_meta =
             pump_fun_fee_recipient_meta(protocol_params.fee_recipient, is_mayhem_mode);
 
@@ -240,13 +234,9 @@ impl InstructionBuilder for PumpFunInstructionBuilder {
             ),
         };
 
-        let bonding_curve_addr = if bonding_curve.account == Pubkey::default() {
-            get_bonding_curve_pda(&params.input_mint).ok_or_else(|| {
-                anyhow!("bonding_curve PDA derivation failed for mint {}", params.input_mint)
-            })?
-        } else {
-            bonding_curve.account
-        };
+        let bonding_curve_addr = get_bonding_curve_pda(&params.input_mint).ok_or_else(|| {
+            anyhow!("bonding_curve PDA derivation failed for mint {}", params.input_mint)
+        })?;
 
         // Determine token program based on mayhem mode
         let is_mayhem_mode = bonding_curve.is_mayhem_mode;
@@ -258,15 +248,11 @@ impl InstructionBuilder for PumpFunInstructionBuilder {
         };
 
         let associated_bonding_curve =
-            if protocol_params.associated_bonding_curve == Pubkey::default() {
-                crate::common::fast_fn::get_associated_token_address_with_program_id_fast(
-                    &bonding_curve_addr,
-                    &params.input_mint,
-                    &token_program,
-                )
-            } else {
-                protocol_params.associated_bonding_curve
-            };
+            crate::common::fast_fn::get_associated_token_address_with_program_id_fast(
+                &bonding_curve_addr,
+                &params.input_mint,
+                &token_program,
+            );
 
         let user_token_account =
             crate::common::fast_fn::get_associated_token_address_with_program_id_fast_use_seed(

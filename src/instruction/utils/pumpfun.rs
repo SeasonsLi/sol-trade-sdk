@@ -258,26 +258,16 @@ pub fn get_standard_fee_recipient_meta_random() -> AccountMeta {
     }
 }
 
-/// Use gRPC/event fee recipient only if authorized for this bonding curve mode; otherwise pick
-/// randomly from the same pool as `@pump-fun/pump-sdk` `getFeeRecipient` (avoids 6000 NotAuthorized
-/// when event fee is from a different mode, e.g. standard AMM fee on a Mayhem coin).
+/// 账户 #2 fee recipient：优先使用 gRPC/ShredStream 解析值（同笔 create_v2+buy 的 `observed_fee_recipient` 或 `tradeEvent.feeRecipient`）；未提供时按 mayhem 从静态池随机。
 #[inline]
-pub fn pump_fun_fee_recipient_meta(from_event: Pubkey, is_mayhem_mode: bool) -> AccountMeta {
-    if from_event != Pubkey::default() {
-        let authorized = if is_mayhem_mode {
-            is_mayhem_fee_recipient(&from_event)
-        } else {
-            from_event == global_constants::FEE_RECIPIENT || is_amm_fee_recipient(&from_event)
-        };
-        if authorized {
-            return AccountMeta {
-                pubkey: from_event,
-                is_signer: false,
-                is_writable: true,
-            };
+pub fn pump_fun_fee_recipient_meta(from_stream: Pubkey, is_mayhem_mode: bool) -> AccountMeta {
+    if from_stream != Pubkey::default() {
+        AccountMeta {
+            pubkey: from_stream,
+            is_signer: false,
+            is_writable: true,
         }
-    }
-    if is_mayhem_mode {
+    } else if is_mayhem_mode {
         get_mayhem_fee_recipient_meta_random()
     } else {
         get_standard_fee_recipient_meta_random()
@@ -355,29 +345,64 @@ pub fn get_fee_sharing_config_pda(mint: &Pubkey) -> Option<Pubkey> {
     .map(|(p, _)| p)
 }
 
-/// Creator vault for buy/sell must be `PDA(["creator-vault", bonding_curve.creator])` (IDL `bonding_curve.creator`).
-/// After fee-sharing migration, on-chain `creator` may be [`get_fee_sharing_config_pda`]`(mint)` while gRPC
-/// still sends the wallet — accept `from_event` when it matches either `PDA(wallet)` or `PDA(sharing_cfg)`.
+/// PDA of `["creator-vault", Pubkey::default()]`. Never use as a real vault — it is only produced when
+/// `creator` was missing and code incorrectly derived a vault; on-chain this fails with Anchor 2006.
+#[inline]
+pub fn phantom_default_creator_vault() -> Pubkey {
+    solana_sdk::pubkey!("2DR3iqRPVThyRLVJnwjPW1qiGWrp8RUFfHVjMbZyhdNc")
+}
+
+#[inline]
+pub fn is_phantom_default_creator_vault(pk: &Pubkey) -> bool {
+    *pk == phantom_default_creator_vault()
+}
+
+/// Resolve `creator_vault` for Pump buy/sell account #10.
+///
+/// - If `creator` is **missing** in the outer trade-event borsh (`Pubkey::default()`) but
+///   `creator_vault` was filled from **instruction accounts** (e.g. `fill_trade_accounts` index 9),
+///   **trust that vault** — unless it equals [`phantom_default_creator_vault`] (bad derivation / cache).
+/// - If event `creator_vault` is **missing** → [`get_creator_vault_pda`]`(creator)` (never `PDA(default)`).
+/// - If it **matches** `PDA(creator)` or `PDA(fee_sharing_config(mint))` → use it (fast path, matches ix).
+/// - If it **does not match** either (e.g. stale vault but `creator` from tradeEvent is correct) → use
+///   [`get_creator_vault_pda`]`(creator)` so seeds match on-chain bonding curve (fixes 2006 Left≠Right).
 #[inline]
 pub fn resolve_creator_vault_for_ix(
     creator: &Pubkey,
-    from_event: Pubkey,
+    creator_vault_from_event: Pubkey,
     mint: &Pubkey,
 ) -> Option<Pubkey> {
-    let v_creator = get_creator_vault_pda(creator)?;
-    let sharing = get_fee_sharing_config_pda(mint)?;
-    let v_sharing = get_creator_vault_pda(&sharing)?;
+    let phantom = phantom_default_creator_vault();
 
-    if from_event == Pubkey::default() {
-        return Some(v_creator);
+    if *creator == Pubkey::default() {
+        if creator_vault_from_event == Pubkey::default() {
+            return None;
+        }
+        if creator_vault_from_event == phantom {
+            return None;
+        }
+        return Some(creator_vault_from_event);
     }
-    if from_event == v_creator || from_event == v_sharing {
-        return Some(from_event);
+
+    // Real creator: poisoned cache may hold phantom vault — always remap to PDA(creator).
+    if creator_vault_from_event == phantom {
+        return get_creator_vault_pda(creator);
     }
-    if v_creator == v_sharing {
-        return Some(v_creator);
+
+    let v_derived = get_creator_vault_pda(creator)?;
+    if creator_vault_from_event == Pubkey::default() {
+        return Some(v_derived);
     }
-    Some(v_creator)
+    if creator_vault_from_event == v_derived {
+        return Some(creator_vault_from_event);
+    }
+    if let Some(sharing) = get_fee_sharing_config_pda(mint) {
+        let v_sharing = get_creator_vault_pda(&sharing)?;
+        if creator_vault_from_event == v_sharing {
+            return Some(creator_vault_from_event);
+        }
+    }
+    Some(v_derived)
 }
 
 #[inline]
@@ -467,5 +492,48 @@ mod tests {
         let a = get_fee_sharing_config_pda(&mint).unwrap();
         let b = get_fee_sharing_config_pda(&mint).unwrap();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn default_creator_yields_fixed_creator_vault() {
+        let v = get_creator_vault_pda(&Pubkey::default()).unwrap();
+        assert_eq!(v, phantom_default_creator_vault(), "phantom vault constant must match PDA(default creator)");
+    }
+
+    #[test]
+    fn resolve_uses_ix_vault_when_creator_borsh_is_default() {
+        let mint = Pubkey::new_unique();
+        let ix_vault = Pubkey::new_unique();
+        let resolved = resolve_creator_vault_for_ix(&Pubkey::default(), ix_vault, &mint);
+        assert_eq!(resolved, Some(ix_vault));
+    }
+
+    #[test]
+    fn resolve_returns_none_when_creator_and_vault_missing() {
+        let mint = Pubkey::new_unique();
+        assert_eq!(
+            resolve_creator_vault_for_ix(&Pubkey::default(), Pubkey::default(), &mint),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_rejects_phantom_vault_when_creator_borsh_is_default() {
+        let mint = Pubkey::new_unique();
+        assert_eq!(
+            resolve_creator_vault_for_ix(&Pubkey::default(), phantom_default_creator_vault(), &mint),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_remaps_phantom_vault_when_creator_known() {
+        let creator = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let expected = get_creator_vault_pda(&creator).unwrap();
+        assert_eq!(
+            resolve_creator_vault_for_ix(&creator, phantom_default_creator_vault(), &mint),
+            Some(expected)
+        );
     }
 }

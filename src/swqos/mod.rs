@@ -22,7 +22,6 @@ use std::sync::Arc;
 
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::transaction::VersionedTransaction;
-use tokio::sync::RwLock;
 
 use anyhow::Result;
 
@@ -52,11 +51,8 @@ use crate::{
     },
 };
 
-lazy_static::lazy_static! {
-    /// Reserved for future per-SWQOS tip account caching (currently unused).
-    #[allow(dead_code)]
-    static ref TIP_ACCOUNT_CACHE: RwLock<Vec<String>> = RwLock::new(Vec::new());
-}
+// Tip 账户：`SwqosClient::get_tip_account()` 在各实现里多为静态常量；同一批多路提交时，
+// 在 `trading::core::async_executor::execute_parallel` 内用局部 `tip_cache`（按 client 指针）去重解析。
 
 /// SWQOS provider blacklist configuration
 /// Providers added here will be disabled even if configured by user

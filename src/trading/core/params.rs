@@ -127,13 +127,13 @@ impl std::fmt::Debug for SwapParams {
 pub struct PumpFunParams {
     pub bonding_curve: Arc<BondingCurveAccount>,
     pub associated_bonding_curve: Pubkey,
-    /// `PDA(["creator-vault", bonding_curve.creator])`; from_trade resolves when event vault mismatches.
+    /// Resolved by [`resolve_creator_vault_for_ix`](crate::instruction::utils::pumpfun::resolve_creator_vault_for_ix): use ix vault when it matches `PDA(creator)` or fee-sharing vault; else `PDA(creator)`.
     pub creator_vault: Pubkey,
     pub token_program: Pubkey,
     /// Whether to close token account when selling, only effective during sell operations
     pub close_token_account_when_sell: Option<bool>,
-    /// Fee recipient for buy/sell account #2. When set from gRPC (matches `@pump-fun/pump-sdk` `fees.ts` / observed trades), mirrors on-chain choice.
-    /// `Pubkey::default()` uses the same random pools as `getFeeRecipient` / `getStaticRandomFeeRecipient` in the npm SDK.
+    /// Fee recipient for buy/sell account #2. Set from sol-parser-sdk (`tradeEvent.feeRecipient` / 同笔 create_v2+buy 回填的 `observed_fee_recipient`)；热路径不查 RPC。
+    /// `Pubkey::default()` 时按 mayhem 从静态池随机（与 npm 静态池一致，可能落后于主网 Global）。
     pub fee_recipient: Pubkey,
 }
 
@@ -187,6 +187,9 @@ impl PumpFunParams {
             creator_vault,
             &mint,
         )
+        .or_else(|| {
+            crate::instruction::utils::pumpfun::get_creator_vault_pda(&bonding_curve_account.creator)
+        })
         .unwrap_or_default();
         Self {
             bonding_curve: Arc::new(bonding_curve_account),
@@ -200,7 +203,11 @@ impl PumpFunParams {
 
     /// When building from event/parser (e.g. sol-parser-sdk), pass `is_cashback_coin` from the event
     /// so that sell instructions include the correct remaining accounts for cashback.
-    /// `mayhem_mode`: `Some` when known from Create/Trade event. `None` → infer from `fee_recipient` (Mayhem list only).
+    ///
+    /// `mayhem_mode`:
+    /// - **`Some(v)`**（推荐）：显式使用链上事件中的值。gRPC 日志解析对应 Explorer 的 `tradeEvent.mayhemMode`；
+    ///   **不会**再用 `fee_recipient` 覆盖。
+    /// - **`None`**：无该字段时（例如 ShredStream 仅解外层指令、或冷路径），才用 `fee_recipient` 是否落在 Mayhem 静态列表上推断。
     pub fn from_trade(
         bonding_curve: Pubkey,
         associated_bonding_curve: Pubkey,
@@ -217,8 +224,10 @@ impl PumpFunParams {
         is_cashback_coin: bool,
         mayhem_mode: Option<bool>,
     ) -> Self {
-        let is_mayhem_mode =
-            mayhem_mode.unwrap_or_else(|| is_mayhem_fee_recipient(&fee_recipient));
+        let is_mayhem_mode = match mayhem_mode {
+            Some(v) => v,
+            None => is_mayhem_fee_recipient(&fee_recipient),
+        };
         let bonding_curve = BondingCurveAccount::from_trade(
             bonding_curve,
             mint,
@@ -235,6 +244,9 @@ impl PumpFunParams {
             creator_vault,
             &mint,
         )
+        .or_else(|| {
+            crate::instruction::utils::pumpfun::get_creator_vault_pda(&bonding_curve.creator)
+        })
         .unwrap_or_default();
         Self {
             bonding_curve: Arc::new(bonding_curve),
